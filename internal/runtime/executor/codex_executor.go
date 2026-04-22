@@ -4,11 +4,15 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	codexauth "github.com/router-for-me/CLIProxyAPI/v6/internal/auth/codex"
@@ -35,6 +39,14 @@ const (
 )
 
 var dataTag = []byte("data:")
+
+var claudeFastModeCache = struct {
+	sync.Mutex
+	path    string
+	mtime   time.Time
+	enabled bool
+	loaded  bool
+}{}
 
 // Streamed Codex responses may emit response.output_item.done events while leaving
 // response.completed.response.output empty. Keep the stream path aligned with the
@@ -173,6 +185,7 @@ func (e *CodexExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, re
 
 	requestedModel := helps.PayloadRequestedModel(opts, req.Model)
 	body = helps.ApplyPayloadConfigWithRoot(e.cfg, baseModel, to.String(), "", body, originalTranslated, requestedModel)
+	body = applyClaudeFastServiceTier(ctx, body, from, baseModel)
 	body, _ = sjson.SetBytes(body, "model", baseModel)
 	body, _ = sjson.SetBytes(body, "stream", true)
 	body, _ = sjson.DeleteBytes(body, "previous_response_id")
@@ -323,6 +336,7 @@ func (e *CodexExecutor) executeCompact(ctx context.Context, auth *cliproxyauth.A
 
 	requestedModel := helps.PayloadRequestedModel(opts, req.Model)
 	body = helps.ApplyPayloadConfigWithRoot(e.cfg, baseModel, to.String(), "", body, originalTranslated, requestedModel)
+	body = applyClaudeFastServiceTier(ctx, body, from, baseModel)
 	body, _ = sjson.SetBytes(body, "model", baseModel)
 	body, _ = sjson.DeleteBytes(body, "stream")
 	body = normalizeCodexInstructions(body)
@@ -414,6 +428,7 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
 
 	requestedModel := helps.PayloadRequestedModel(opts, req.Model)
 	body = helps.ApplyPayloadConfigWithRoot(e.cfg, baseModel, to.String(), "", body, originalTranslated, requestedModel)
+	body = applyClaudeFastServiceTier(ctx, body, from, baseModel)
 	body, _ = sjson.DeleteBytes(body, "previous_response_id")
 	body, _ = sjson.DeleteBytes(body, "prompt_cache_retention")
 	body, _ = sjson.DeleteBytes(body, "safety_identifier")
@@ -819,6 +834,66 @@ func normalizeCodexInstructions(body []byte) []byte {
 		body, _ = sjson.SetBytes(body, "instructions", "")
 	}
 	return body
+}
+
+func applyClaudeFastServiceTier(ctx context.Context, body []byte, from sdktranslator.Format, baseModel string) []byte {
+	if from != sdktranslator.FromString("claude") {
+		return body
+	}
+	if strings.TrimSpace(baseModel) != "gpt-5.4" {
+		return body
+	}
+	enabled, ok := claudeFastModeEnabled(ctx)
+	if !ok || !enabled {
+		return body
+	}
+	body, _ = sjson.SetBytes(body, "service_tier", "priority")
+	return body
+}
+
+func claudeFastModeEnabled(ctx context.Context) (bool, bool) {
+	settingsPath, ok := resolveClaudeSettingsPath(ctx)
+	if !ok {
+		return false, false
+	}
+	info, err := os.Stat(settingsPath)
+	if err != nil {
+		return false, false
+	}
+	mtime := info.ModTime()
+
+	claudeFastModeCache.Lock()
+	defer claudeFastModeCache.Unlock()
+	if claudeFastModeCache.loaded && claudeFastModeCache.path == settingsPath && claudeFastModeCache.mtime.Equal(mtime) {
+		return claudeFastModeCache.enabled, true
+	}
+
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		return false, false
+	}
+	var payload struct {
+		FastMode bool `json:"fastMode"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return false, false
+	}
+	claudeFastModeCache.path = settingsPath
+	claudeFastModeCache.mtime = mtime
+	claudeFastModeCache.enabled = payload.FastMode
+	claudeFastModeCache.loaded = true
+	return payload.FastMode, true
+}
+
+func resolveClaudeSettingsPath(ctx context.Context) (string, bool) {
+	if dir := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")); dir != "" {
+		return filepath.Join(dir, "settings.json"), true
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return "", false
+	}
+	return filepath.Join(home, ".claude", "settings.json"), true
 }
 
 func isCodexModelCapacityError(errorBody []byte) bool {

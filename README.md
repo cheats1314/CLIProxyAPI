@@ -106,6 +106,67 @@ These routes help you select the protocol surface, but they do not by themselves
 - Watcher: [docs/sdk-watcher.md](docs/sdk-watcher.md)
 - Custom Provider Example: `examples/custom-provider`
 
+## Claude Code fastMode → Codex priority bridge
+
+This repository can be patched so Claude Code's local `fastMode` setting is bridged to Codex `service_tier: "priority"` entirely inside CLIProxyAPI.
+
+Behavior:
+
+- Scope is **CPA-only**: no CCS changes are required.
+- Trigger source is Claude Code's `settings.json`.
+- Only Claude-originated requests mapped to base model `gpt-5.4` are upgraded.
+- When `fastMode` is enabled, CPA injects `service_tier: "priority"` into the upstream Codex `/responses` payload.
+- When `fastMode` is disabled or absent, CPA sends the normal payload.
+- The setting is cached in memory and automatically reloaded when `settings.json` changes on disk.
+
+Implementation file:
+
+- `internal/runtime/executor/codex_executor.go`
+
+Optional override for packaging and tests:
+
+- `CLAUDE_CONFIG_DIR` — if set, CPA reads `settings.json` from this directory instead of `~/.claude/`.
+
+This makes the solution portable across Linux and Windows because the runtime only needs a readable Claude config directory and does not depend on shell-specific wrappers.
+
+### Build
+
+Linux/macOS:
+
+```bash
+go build -o cli-proxy-api ./cmd/server
+```
+
+Windows PowerShell:
+
+```powershell
+go build -o cli-proxy-api.exe .\cmd\server
+```
+
+### Runtime examples
+
+Linux:
+
+```bash
+export CLAUDE_CONFIG_DIR="$HOME/.claude"
+./cli-proxy-api
+```
+
+Windows PowerShell:
+
+```powershell
+$env:CLAUDE_CONFIG_DIR = "$HOME/.claude"
+.\cli-proxy-api.exe
+```
+
+### Tests
+
+Run the focused fastMode bridge tests:
+
+```bash
+go test ./internal/runtime/executor -run 'TestApplyClaudeFastServiceTier|TestClaudeFastModeEnabledReloadsWhenSettingsFileChanges'
+```
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
