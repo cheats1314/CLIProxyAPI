@@ -28,6 +28,13 @@
 
 ## 构建
 
+### 环境要求
+
+- 已安装 Go 工具链
+- 已拉取本 fork 源码
+
+### 从源码构建
+
 Linux/macOS:
 
 ```bash
@@ -39,6 +46,64 @@ Windows PowerShell:
 ```powershell
 go build -o cli-proxy-api.exe .\cmd\server
 ```
+
+### 以后 upstream CPA 更新时，真正需要维护哪些文件
+
+这个 fork 的功能补丁刻意保持得很小。
+正常的小版本更新里，最关键的是：
+
+- 已修改：`internal/runtime/executor/codex_executor.go`
+- 新增：`internal/runtime/executor/codex_executor_fastmode_test.go`
+
+README 系列文件只是文档。
+
+很多情况下，你确实只需要把上面这份代码补丁继续带上，然后重新编译即可。
+但不要机械地盲目覆盖，还是要先确认 upstream 有没有改动最终的 Codex payload 组装路径。
+如果 `codex_executor.go` 依然负责最终 `/responses` 请求体落地，那么通常替换这几个代码文件再重编译就够了。
+
+### 重编译后的快速验证
+
+```bash
+go test ./internal/runtime/executor -run 'TestApplyClaudeFastServiceTier|TestClaudeFastModeEnabledReloadsWhenSettingsFileChanges'
+```
+
+## 使用方法
+
+### 如何安装到你自己的电脑上
+
+如果你当前实际运行的 CPA 二进制是：
+
+- `/home/cheat/cliproxyapi/cli-proxy-api`
+
+那么最实用的安装流程是：
+
+1. 先备份现有二进制
+2. 用本 fork 编译出的新二进制覆盖它
+3. 重启 CPA
+4. 验证 Claude `fastMode` 是否真的变成 Codex `service_tier: "priority"`
+
+Linux 示例：
+
+```bash
+cp /home/cheat/cliproxyapi/cli-proxy-api /home/cheat/cliproxyapi/cli-proxy-api.bak
+cp ./cli-proxy-api /home/cheat/cliproxyapi/cli-proxy-api
+```
+
+如果你的 CPA 由 systemd 或其他 supervisor 管理，就按你平时的方式重启服务。
+如果你是手工启动，就先停掉旧进程，再启动新二进制。
+
+如果你想更稳一点，也可以先复制一份配置，在另一个端口启动新二进制做验证，确认没问题后再替换现网。
+
+### 以后升级这个 fork 的最小流程
+
+对于小更新，你的常规流程可以是：
+
+1. 同步 upstream
+2. 保留或重新应用 `codex_executor.go` 里的补丁
+3. 保留 `codex_executor_fastmode_test.go`
+4. 重新编译
+5. 重新运行聚焦测试
+6. 替换你本机安装的 CPA 二进制
 
 ## 使用方法
 

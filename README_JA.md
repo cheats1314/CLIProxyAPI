@@ -28,6 +28,13 @@
 
 ## ビルド
 
+### 必要条件
+
+- Go ツールチェーンがインストールされていること
+- この fork のソースを取得していること
+
+### ソースからビルド
+
 Linux/macOS:
 
 ```bash
@@ -39,6 +46,64 @@ Windows PowerShell:
 ```powershell
 go build -o cli-proxy-api.exe .\cmd\server
 ```
+
+### upstream CPA 更新時に実際に持ち回るべきファイル
+
+この fork の機能パッチは意図的に小さく保っています。
+通常の小さな upstream 更新では、重要なのは次です。
+
+- 変更済み: `internal/runtime/executor/codex_executor.go`
+- 追加済み: `internal/runtime/executor/codex_executor_fastmode_test.go`
+
+README 系はドキュメントのみです。
+
+多くのケースでは、このコードパッチを維持して再ビルドするだけで足ります。
+ただし、機械的に上書きする前に upstream が最終 Codex payload 組み立て経路を変えていないか確認してください。
+`codex_executor.go` が引き続き最終 `/responses` payload 書き込みを担当しているなら、これらのコードファイルを反映して再ビルドすれば通常は十分です。
+
+### 再ビルド後の簡易確認
+
+```bash
+go test ./internal/runtime/executor -run 'TestApplyClaudeFastServiceTier|TestClaudeFastModeEnabledReloadsWhenSettingsFileChanges'
+```
+
+## 使い方
+
+### 自分のPCへインストールする方法
+
+現在動かしている CPA バイナリが次なら：
+
+- `/home/cheat/cliproxyapi/cli-proxy-api`
+
+実用的な導入手順は次です。
+
+1. 既存バイナリをバックアップする
+2. この fork でビルドした新バイナリで置き換える
+3. CPA を再起動する
+4. Claude `fastMode` が Codex `service_tier: "priority"` になることを確認する
+
+Linux 例：
+
+```bash
+cp /home/cheat/cliproxyapi/cli-proxy-api /home/cheat/cliproxyapi/cli-proxy-api.bak
+cp ./cli-proxy-api /home/cheat/cliproxyapi/cli-proxy-api
+```
+
+CPA を systemd や他の supervisor で管理しているなら、普段どおりの方法で再起動してください。
+手動起動なら旧プロセスを止めて新バイナリを起動します。
+
+より安全に進めたい場合は、設定をコピーして別ポートで新バイナリを先に動かし、確認後に本番バイナリを置き換えてください。
+
+### 今後この fork を更新する最小フロー
+
+小さな更新であれば通常は次の流れで足ります。
+
+1. upstream を同期する
+2. `codex_executor.go` のパッチを維持または再適用する
+3. `codex_executor_fastmode_test.go` を維持する
+4. 再ビルドする
+5. 対象テストを再実行する
+6. ローカルに導入済みの CPA バイナリを置き換える
 
 ## 使い方
 

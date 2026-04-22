@@ -26,6 +26,13 @@ This fork moves the logic into `internal/runtime/executor/codex_executor.go`, wh
 
 ## Build
 
+### Requirements
+
+- Go toolchain installed
+- A working checkout of this fork
+
+### Build from source
+
 Linux/macOS:
 
 ```bash
@@ -37,6 +44,64 @@ Windows PowerShell:
 ```powershell
 go build -o cli-proxy-api.exe .\cmd\server
 ```
+
+### What to carry forward when upstream CPA updates
+
+The functional patch in this fork is intentionally small.
+For normal upstream updates, the important files are:
+
+- Modified: `internal/runtime/executor/codex_executor.go`
+- Added: `internal/runtime/executor/codex_executor_fastmode_test.go`
+
+The README files are documentation only.
+
+In many upstream updates, you can re-apply just the code patch above and rebuild.
+That said, always verify whether upstream changed the final Codex payload assembly path before blindly copying files.
+If `codex_executor.go` still owns the final `/responses` payload write step, replacing these code files and rebuilding is usually enough.
+
+### Quick verification after rebuilding
+
+```bash
+go test ./internal/runtime/executor -run 'TestApplyClaudeFastServiceTier|TestClaudeFastModeEnabledReloadsWhenSettingsFileChanges'
+```
+
+## Usage
+
+### Install on your own computer
+
+If you already run CPA from:
+
+- `/home/cheat/cliproxyapi/cli-proxy-api`
+
+then the practical install flow is:
+
+1. Back up the current binary
+2. Replace it with the fork build
+3. Restart CPA
+4. Verify that Claude `fastMode` produces Codex `service_tier: "priority"`
+
+Example on Linux:
+
+```bash
+cp /home/cheat/cliproxyapi/cli-proxy-api /home/cheat/cliproxyapi/cli-proxy-api.bak
+cp ./cli-proxy-api /home/cheat/cliproxyapi/cli-proxy-api
+```
+
+If CPA is managed by systemd or another supervisor, restart it using your normal service command.
+If you launch it manually, stop the old process and start the new binary.
+
+If you want a safer rollout, run the new binary on a different port first with a copied config, verify behavior, then replace the live binary.
+
+### Upgrade this fork later
+
+For small upstream updates, your normal flow can be:
+
+1. Update from upstream
+2. Re-apply or keep the `codex_executor.go` patch
+3. Keep `codex_executor_fastmode_test.go`
+4. Rebuild
+5. Re-run the focused tests
+6. Replace the installed CPA binary
 
 ## Usage
 
