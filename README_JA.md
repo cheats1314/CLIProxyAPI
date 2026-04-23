@@ -6,20 +6,22 @@
 
 ## この fork が行うこと
 
-- Claude Code の `settings.json` を読む
-- `fastMode: true` を検出する
-- Claude 由来で、最終的にベースモデル `gpt-5.4` に解決されるリクエストにのみ適用する
+- Codex service tier を指定するための request-scoped executor metadata hint を追加する
+- 現在の実運用を壊さないよう、ローカル Claude `settings.json` fallback を保持する
+- 最終的にベースモデル `gpt-5.4` に解決される Codex リクエストにのみ適用する
 - 最終的に Codex へ送る request body に `service_tier: "priority"` を注入する
-- 設定をメモリにキャッシュし、`settings.json` が変更されたら自動で再読込する
-- CCS の変更は不要
+- ローカル `fastMode` をメモリにキャッシュし、`settings.json` が変わると自動再読込する
 - Codex HTTP executor と websocket executor の両方をカバーする
 
 ## なぜこの fork が必要か
 
-Claude Code の `fastMode` はローカルの Claude 設定に保存されますが、現在 CPA に入ってくるリクエストには、それを直接再利用できるきれいな fast フィールドがありません。
-そのため、この fork では CLIProxyAPI 内部でローカルブリッジを実装し、CCS を変更せずに Codex priority モードを有効にします。
+Claude Code の `fastMode` はローカルの Claude 設定に保存されますが、現在 CPA に入ってくるリクエストには、それを直接再利用できる明示的な fast フィールドがありません。
+そのため、この fork は二層構成にしています。
 
-前回版は Codex の一部経路しかカバーしていませんでした。今回は upstream `v6.9.34` をベースにし、実際に命中する 2 つの実行経路を両方修正しています。
+- PR 向きのコア: request-scoped executor metadata (`codex_service_tier`)
+- 現在の実運用向け fallback: ローカル Claude settings の読み取り
+
+前回版は Codex の一部経路しかカバーしていませんでした。今回は upstream `v6.9.34` をベースにし、実際に命中する 2 つの実行経路を両方修正し、metadata-hint コアも加えています。
 
 ## この fork で変更したファイル
 

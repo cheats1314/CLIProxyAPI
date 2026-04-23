@@ -6,20 +6,22 @@ This fork adds a CPA-only bridge from Claude Code `fastMode` to Codex `service_t
 
 ## What this fork does
 
-- Reads Claude Code `settings.json`
-- Detects `fastMode: true`
-- Applies only to Claude-originated requests that resolve to base model `gpt-5.4`
+- Adds a request-scoped executor metadata hint for Codex service tier selection
+- Keeps a local Claude `settings.json` fallback so current deployments work without CCS changes
+- Applies only when the final Codex target resolves to base model `gpt-5.4`
 - Injects `service_tier: "priority"` into the final upstream Codex request body
-- Caches the setting in memory and reloads automatically when `settings.json` changes on disk
-- Requires no CCS changes
+- Caches local `fastMode` in memory and reloads automatically when `settings.json` changes on disk
 - Covers both Codex HTTP executor and Codex websocket executor paths
 
 ## Why this fork exists
 
 Claude Code `fastMode` is stored in local Claude settings, but the incoming CPA request does not expose a clean fast field that upstream CPA can consume directly.
-This fork implements a local bridge inside CLIProxyAPI so existing Claude Code sessions can drive Codex priority mode without changing CCS.
+This fork therefore uses a two-layer design:
 
-A previous version only patched part of the Codex path. This refreshed fork is based on upstream `v6.9.34` and patches both real execution paths used by Codex requests.
+- a cleaner PR-grade core based on request-scoped executor metadata (`codex_service_tier`)
+- a fork-only fallback that reads local Claude settings for current real-world deployments
+
+A previous version only patched part of the Codex path. This refreshed fork is based on upstream `v6.9.34`, patches both real execution paths used by Codex requests, and adds the metadata-hint core.
 
 ## Files changed in this fork
 

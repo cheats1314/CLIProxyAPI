@@ -185,7 +185,7 @@ func (e *CodexExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, re
 
 	requestedModel := helps.PayloadRequestedModel(opts, req.Model)
 	body = helps.ApplyPayloadConfigWithRoot(e.cfg, baseModel, to.String(), "", body, originalTranslated, requestedModel)
-	body = applyClaudeFastServiceTier(ctx, body, from, baseModel)
+	body = applyCodexServiceTier(ctx, body, opts, from, baseModel)
 	body, _ = sjson.SetBytes(body, "model", baseModel)
 	body, _ = sjson.SetBytes(body, "stream", true)
 	body, _ = sjson.DeleteBytes(body, "previous_response_id")
@@ -336,7 +336,7 @@ func (e *CodexExecutor) executeCompact(ctx context.Context, auth *cliproxyauth.A
 
 	requestedModel := helps.PayloadRequestedModel(opts, req.Model)
 	body = helps.ApplyPayloadConfigWithRoot(e.cfg, baseModel, to.String(), "", body, originalTranslated, requestedModel)
-	body = applyClaudeFastServiceTier(ctx, body, from, baseModel)
+	body = applyCodexServiceTier(ctx, body, opts, from, baseModel)
 	body, _ = sjson.SetBytes(body, "model", baseModel)
 	body, _ = sjson.DeleteBytes(body, "stream")
 	body = normalizeCodexInstructions(body)
@@ -428,7 +428,7 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
 
 	requestedModel := helps.PayloadRequestedModel(opts, req.Model)
 	body = helps.ApplyPayloadConfigWithRoot(e.cfg, baseModel, to.String(), "", body, originalTranslated, requestedModel)
-	body = applyClaudeFastServiceTier(ctx, body, from, baseModel)
+	body = applyCodexServiceTier(ctx, body, opts, from, baseModel)
 	body, _ = sjson.DeleteBytes(body, "previous_response_id")
 	body, _ = sjson.DeleteBytes(body, "prompt_cache_retention")
 	body, _ = sjson.DeleteBytes(body, "safety_identifier")
@@ -836,19 +836,50 @@ func normalizeCodexInstructions(body []byte) []byte {
 	return body
 }
 
-func applyClaudeFastServiceTier(ctx context.Context, body []byte, from sdktranslator.Format, baseModel string) []byte {
-	if from != sdktranslator.FromString("claude") {
+func applyCodexServiceTier(ctx context.Context, body []byte, opts cliproxyexecutor.Options, from sdktranslator.Format, baseModel string) []byte {
+	if existing := strings.TrimSpace(gjson.GetBytes(body, "service_tier").String()); existing != "" {
 		return body
 	}
-	if strings.TrimSpace(baseModel) != "gpt-5.4" {
+	tier, ok := resolveCodexServiceTier(ctx, body, opts, from, baseModel)
+	if !ok || strings.TrimSpace(tier) == "" {
 		return body
+	}
+	body, _ = sjson.SetBytes(body, "service_tier", tier)
+	return body
+}
+
+func resolveCodexServiceTier(ctx context.Context, body []byte, opts cliproxyexecutor.Options, from sdktranslator.Format, baseModel string) (string, bool) {
+	if existing := strings.TrimSpace(gjson.GetBytes(body, "service_tier").String()); existing != "" {
+		return existing, true
+	}
+	if opts.Metadata != nil {
+		if raw, ok := opts.Metadata[cliproxyexecutor.CodexServiceTierMetadataKey]; ok {
+			if tier := strings.TrimSpace(strings.ToLower(fmt.Sprint(raw))); tier != "" {
+				switch tier {
+				case "priority", "default":
+					return tier, true
+				}
+			}
+		}
+	}
+	if tier, ok := resolveLocalClaudeFastModeServiceTier(ctx, from, baseModel); ok {
+		return tier, true
+	}
+	return "", false
+}
+
+func resolveLocalClaudeFastModeServiceTier(ctx context.Context, from sdktranslator.Format, baseModel string) (string, bool) {
+	if from != sdktranslator.FromString("claude") {
+		return "", false
+	}
+	if strings.TrimSpace(baseModel) != "gpt-5.4" {
+		return "", false
 	}
 	enabled, ok := claudeFastModeEnabled(ctx)
 	if !ok || !enabled {
-		return body
+		return "", false
 	}
-	body, _ = sjson.SetBytes(body, "service_tier", "priority")
-	return body
+	return "priority", true
 }
 
 func claudeFastModeEnabled(ctx context.Context) (bool, bool) {

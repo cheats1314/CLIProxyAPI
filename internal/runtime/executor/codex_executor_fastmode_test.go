@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/executor"
 	sdktranslator "github.com/router-for-me/CLIProxyAPI/v6/sdk/translator"
 	"github.com/tidwall/gjson"
 )
@@ -32,19 +33,53 @@ func writeClaudeSettings(t *testing.T, dir string, body string, modTime time.Tim
 	return path
 }
 
-func TestApplyClaudeFastServiceTierAddsPriorityForClaudeGPT54(t *testing.T) {
+func TestApplyCodexServiceTierUsesMetadataHint(t *testing.T) {
 	resetClaudeFastModeCache()
-	dir := t.TempDir()
-	t.Setenv("CLAUDE_CONFIG_DIR", dir)
-	writeClaudeSettings(t, dir, `{"fastMode":true}`, time.Now().Add(-2*time.Second))
-
-	body := applyClaudeFastServiceTier(context.Background(), []byte(`{"model":"gpt-5.4"}`), sdktranslator.FromString("claude"), "gpt-5.4")
+	body := applyCodexServiceTier(
+		context.Background(),
+		[]byte(`{"model":"gpt-5.4"}`),
+		cliproxyexecutor.Options{Metadata: map[string]any{cliproxyexecutor.CodexServiceTierMetadataKey: "priority"}},
+		sdktranslator.FromString("claude"),
+		"gpt-5.4",
+	)
 	if got := gjson.GetBytes(body, "service_tier").String(); got != "priority" {
 		t.Fatalf("service_tier = %q, want %q", got, "priority")
 	}
 }
 
-func TestApplyClaudeFastServiceTierSkipsNonClaudeOrOtherModels(t *testing.T) {
+func TestApplyCodexServiceTierPreservesExistingPayloadField(t *testing.T) {
+	resetClaudeFastModeCache()
+	body := applyCodexServiceTier(
+		context.Background(),
+		[]byte(`{"model":"gpt-5.4","service_tier":"default"}`),
+		cliproxyexecutor.Options{Metadata: map[string]any{cliproxyexecutor.CodexServiceTierMetadataKey: "priority"}},
+		sdktranslator.FromString("claude"),
+		"gpt-5.4",
+	)
+	if got := gjson.GetBytes(body, "service_tier").String(); got != "default" {
+		t.Fatalf("service_tier = %q, want %q", got, "default")
+	}
+}
+
+func TestApplyCodexServiceTierFallsBackToClaudeFastMode(t *testing.T) {
+	resetClaudeFastModeCache()
+	dir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	writeClaudeSettings(t, dir, `{"fastMode":true}`, time.Now().Add(-2*time.Second))
+
+	body := applyCodexServiceTier(
+		context.Background(),
+		[]byte(`{"model":"gpt-5.4"}`),
+		cliproxyexecutor.Options{},
+		sdktranslator.FromString("claude"),
+		"gpt-5.4",
+	)
+	if got := gjson.GetBytes(body, "service_tier").String(); got != "priority" {
+		t.Fatalf("service_tier = %q, want %q", got, "priority")
+	}
+}
+
+func TestApplyCodexServiceTierSkipsNonClaudeOrOtherModelsWithoutMetadata(t *testing.T) {
 	resetClaudeFastModeCache()
 	dir := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", dir)
@@ -62,7 +97,7 @@ func TestApplyClaudeFastServiceTierSkipsNonClaudeOrOtherModels(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			resetClaudeFastModeCache()
-			body := applyClaudeFastServiceTier(context.Background(), []byte(`{"model":"`+tc.baseModel+`"}`), tc.from, tc.baseModel)
+			body := applyCodexServiceTier(context.Background(), []byte(`{"model":"`+tc.baseModel+`"}`), cliproxyexecutor.Options{}, tc.from, tc.baseModel)
 			if got := gjson.GetBytes(body, "service_tier").String(); got != "" {
 				t.Fatalf("service_tier = %q, want empty", got)
 			}
